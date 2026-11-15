@@ -5,7 +5,7 @@ const punctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
 const entities = { amp:'&', lt:'<', gt:'>', quot:'"', apos:"'", copy:'©', reg:'®', nbsp:'\u00a0', mdash:'—', ndash:'–', hellip:'…', trade:'™', laquo:'«', raquo:'»', lsquo:'‘', rsquo:'’', ldquo:'“', rdquo:'”', euro:'€', pound:'£', yen:'¥', cent:'¢', sect:'§', para:'¶', times:'×', divide:'÷', plusmn:'±', deg:'°', micro:'µ', bull:'•', middot:'·', acute:'´', uml:'¨', not:'¬' };
 function decodeEntity(s) { const b=s.slice(1,-1); if (b[0]==='#') { const h=b[1]==='x'||b[1]==='X'; let n=Number.parseInt(b.slice(h?2:1),h?16:10); if(!n||(n>=0xd800&&n<=0xdfff)) return '\uFFFD'; if(n>0x10ffff)return s; return String.fromCodePoint(n); } return Object.prototype.hasOwnProperty.call(entities,b)?entities[b]:s; }
 
-function inline(src, refs, depth = 0) {
+function inline(src, refs, depth = 0, noAuto = false) {
   if (depth > 12) return escapeHtml(src);
   const emphasis = emphasisPairs(src, refs);
   let out = '', plain = '';
@@ -47,12 +47,13 @@ function inline(src, refs, depth = 0) {
           const def = refs.get(normalize(ref));
           if (def) { dest = def.href; title = def.title; i = end; }
         }
-        if (dest !== null) { flush(); const t = title ? ` title="${escapeHref(title)}"` : ''; if (image) { const alt=inline(label,refs,depth+1).replace(/<img\b[^>]*\balt="([^"]*)"[^>]*>/g,'$1').replace(/<[^>]*>/g,'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>'); out += `<img src="${escapeHref(dest)}" alt="${escapeHtml(alt)}"${t}>`; } else out += `<a href="${escapeHref(dest)}"${t}>${inline(label, refs, depth + 1)}</a>`; continue; }
+        if (dest !== null) { flush(); const t = title ? ` title="${escapeHref(title)}"` : ''; if (image) { const alt=inline(label,refs,depth+1).replace(/<img\b[^>]*\balt="([^"]*)"[^>]*>/g,'$1').replace(/<[^>]*>/g,'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>'); out += `<img src="${escapeHref(dest)}" alt="${escapeHtml(alt)}"${t}>`; } else out += `<a href="${escapeHref(dest)}"${t}>${inline(label, refs, depth + 1, true)}</a>`; continue; }
       }
     }
     const pair = emphasis.open.get(i);
-    if (pair) { flush(); out += `<${pair.tag}>${inline(src.slice(i + pair.length, pair.end), refs, depth + 1)}</${pair.tag}>`; i = pair.end + pair.closeLength; continue; }
+    if (pair) { const inner = src.slice(i + pair.length, pair.end); flush(); out += `<${pair.tag}>${inline(inner, refs, depth + 1, noAuto)}</${pair.tag}>`; i = pair.end + pair.closeLength; continue; }
     if (c === '\n') { const hard = / {2,}$/.exec(plain); if (hard) plain = plain.slice(0, -hard[0].length); flush(); out += hard ? '<br>' : '\n'; i++; if(hard)while(src[i]===' ')i++; continue; }
+    if (noAuto && (/^https?:\/\//i.test(src.slice(i)) || /^www\./i.test(src.slice(i)))) { const m = /^(?:https?:\/\/|www\.)[^\s<>]+/i.exec(src.slice(i)); if (m) { plain += m[0]; i += m[0].length; continue; } }
     if ((src.startsWith('mailto:', i) || src.startsWith('xmpp:', i)) && (i === 0 || !/[\w.+-]/.test(src[i - 1]))) { const xmpp=src.startsWith('xmpp:',i); const m=xmpp?/^xmpp:[^\s<>/]+(?:\/[^\s<>/]+)?/i.exec(src.slice(i)):/^mailto:[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*/i.exec(src.slice(i)); if(m){let u=m[0],tail='';while(/[.,!?;:]$/.test(u)){tail=u.slice(-1)+tail;u=u.slice(0,-1);}if(!/^[-_]/.test(tail)&&!/^[-_]/.test(src[i+m[0].length]||'')){flush();out+=`<a href="${escapeHref(u)}">${escapeHtml(u)}</a>`;if(tail)out+=inline(tail,refs,depth+1);i+=m[0].length;continue;} } }
     if (/[A-Za-z0-9]/.test(c) && (i===0||!/[\w.+:-]/.test(src[i-1]))) { const e=/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+/.exec(src.slice(i)); if(e&&/[A-Za-z]$/.test(e[0])&&!/[-_]/.test(src[i+e[0].length]||'')){flush();out+=`<a href="mailto:${escapeHtml(e[0])}">${escapeHtml(e[0])}</a>`;i+=e[0].length;continue;} }
     if ((/^https?:\/\//i.test(src.slice(i)) || /^www\./i.test(src.slice(i))) && (i === 0 || !/[\w@]/.test(src[i - 1]))) { const m = /^(?:https?:\/\/|www\.)[^\s<>]+/i.exec(src.slice(i)); if (m) { let u=m[0], tail=''; if(/^www\./i.test(u)&&/&[^\s]*;/.test(u)){const at=u.indexOf('&');tail=u.slice(at);u=u.slice(0,at);} while(/[.,!?;:]$/.test(u)){tail=u.slice(-1)+tail;u=u.slice(0,-1);} while(u.endsWith(')')&&(u.match(/\)/g)||[]).length>(u.match(/\(/g)||[]).length){tail=')'+tail;u=u.slice(0,-1);} if(u){flush();out+=`<a href="${escapeHtml(/^www\./i.test(u)?'http://'+u:u)}">${escapeHtml(u)}</a>`;out+=tail?inline(tail,refs,depth+1):'';i+=m[0].length;continue;} } }
@@ -220,12 +221,15 @@ function parseBlocks(markdown, refs) {
     if (/^ {0,3}>/.test(line)) {
       const q = [];
       let lazy = false;
+      let quoteFence = false;
       while (i < lines.length - 1) {
         if (/^ {0,3}>/.test(lines[i])) {
           let content = lines[i++].replace(/^ {0,3}> ?/, '');
           if (content.startsWith('\t\t')) content = '      ' + content.slice(2);
           q.push(content && !content.trim() ? (q.some(part => part.trim()) ? '\uE000' : '') : content);
-          lazy = !!content.trim() && indentColumns(content) < 4 && !/^ {0,3}(?:#{1,6}(?:\s|$)|[-+*][ \t]+|\d{1,9}[.)][ \t]+|```|~~~)/.test(content);
+          const fenceLine = /^ {0,3}(`{3,}|~{3,})/.test(content);
+          if (fenceLine) quoteFence = !quoteFence;
+          lazy = !quoteFence && !!content.trim() && indentColumns(content) < 4 && !/^ {0,3}(?:#{1,6}(?:\s|$)|[-+*][ \t]+|\d{1,9}[.)][ \t]+|```|~~~)/.test(content);
         } else if (lazy && lines[i].trim() && (!isBlockStart(lines, i) || indentColumns(lines[i]) >= 4)) {
           const continuation = indentColumns(lines[i]) >= 4 ? stripIndent(lines[i], 4) : lines[i];
           q.push(/^(?:=+|-+)\s*$/.test(continuation) ? '    ' + continuation : '\uE001' + continuation);
